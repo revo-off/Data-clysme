@@ -1,40 +1,38 @@
-from datetime import date
 from pyspark.sql import SparkSession, functions as F
-import time
 
 
 spark = (
     SparkSession.builder
-    .appName("feeder")
+    .appName("weather-feeder-bronze")
     .getOrCreate()
 )
 
 
-input_path = "file:///source/daily_weather.parquet" 
+input_path = "file:///source/daily_weather.parquet"
 df = (
     spark.read
     .parquet(input_path)
 )
 
 df2 = (
-    df.withColumn("year", F.year(F.col("date")))
+    df
+    .withColumn("date", F.to_date(F.col("date")))
+    .withColumn("year", F.year(F.col("date")))
+    .withColumn("month", F.month(F.col("date")))
+    .withColumn("ingestion_ts", F.current_timestamp())
 )
 
-df2.cache()
+row_count = df2.count()
+print("Bronze rows ingested: {}".format(row_count))
 
-df2.show(5)
-
-r =  df2.count()
-print("Nombre de lignes : {}".format(r))
-
-output_base = "hdfs://namenode:9000/data/raw/weather_data_partitioned"
-
-time.sleep(120)
+output_base = "hdfs://namenode:9000/data/bronze/weather_daily"
 
 (
     df2.repartition(4)
     .write
     .mode("overwrite")
-    .partitionBy("year")
+    .partitionBy("year", "month")
     .parquet(output_base)
 )
+
+spark.stop()
