@@ -146,6 +146,18 @@ services:
     ports:
       - "8089:8089"
 
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: my-secret-pw
+      MYSQL_DATABASE: dataclysme
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+
 volumes:
   hadoop_namenode:
   hadoop_datanode:

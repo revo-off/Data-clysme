@@ -1,4 +1,5 @@
 data/
+mysql_data/
 *.parquet
 *.csv
 *.pdf
