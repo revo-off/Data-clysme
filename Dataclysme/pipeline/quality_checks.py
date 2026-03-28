@@ -72,10 +72,13 @@ EXPECTED_GOLD_COLUMNS = {
 
 
 def hdfs_path_exists(path):
-    jvm = spark.sparkContext._jvm
-    hadoop_conf = spark.sparkContext._jsc.hadoopConfiguration()
-    fs = jvm.org.apache.hadoop.fs.FileSystem.get(hadoop_conf)
-    return fs.exists(jvm.org.apache.hadoop.fs.Path(path))
+    try:
+        spark.read.parquet(path).limit(1).count()
+        return True
+    except Exception as e:
+        if "Path does not exist" in str(e) or "FileNotFoundException" in str(e):
+            return False
+        return False
 
 
 def table_exists(table_name):

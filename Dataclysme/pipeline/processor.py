@@ -35,7 +35,7 @@ df2 = (
     df
     .withColumn("date", F.to_date(F.col("date")))
     .withColumn("year", F.col("year").cast("int"))
-    .withColumn("month", F.col("month").cast("int"))
+    .withColumn("month", F.month(F.col("date")))
 )
 
 for c in existing_numeric_cols:
