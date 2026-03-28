@@ -1,4 +1,21 @@
+import argparse
+import os
+
 from pyspark.sql import SparkSession, functions as F
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(description="Run pipeline quality checks.")
+    parser.add_argument("--bronze-path", default=os.getenv("BRONZE_PATH", "hdfs://namenode:9000/data/raw/weather_daily"))
+    parser.add_argument("--silver-table", default=os.getenv("SILVER_TABLE", "default.weather_silver"))
+    parser.add_argument("--jdbc-url", default=os.getenv("JDBC_URL"))
+    parser.add_argument("--jdbc-user", default=os.getenv("JDBC_USER"))
+    parser.add_argument("--jdbc-password", default=os.getenv("JDBC_PASSWORD"))
+    parser.add_argument("--jdbc-driver", default="com.mysql.cj.jdbc.Driver")
+    parser.add_argument("--risk-table", default=os.getenv("DATAMART_RISK_TABLE", "dm_risks"))
+    parser.add_argument("--tourism-table", default=os.getenv("DATAMART_TOURISM_TABLE", "dm_tourism"))
+    parser.add_argument("--agri-table", default=os.getenv("DATAMART_AGRI_TABLE", "dm_agriculture"))
+    return parser
 
 
 spark = (
@@ -8,19 +25,13 @@ spark = (
     .getOrCreate()
 )
 
-
-BRONZE_PATH = "hdfs://namenode:9000/data/bronze/weather_daily"
-SILVER_TABLE = "default.weather_silver"
-GOLD_TABLES = [
-    "default.dm_risks",
-    "default.dm_tourism",
-    "default.dm_agriculture",
-]
-
 EXPECTED_SILVER_COLUMNS = [
     "date",
     "year",
     "month",
+    "day",
+    "weather_year",
+    "weather_month",
     "avg_temp_c",
     "min_temp_c",
     "max_temp_c",
@@ -34,7 +45,7 @@ EXPECTED_SILVER_COLUMNS = [
 ]
 
 EXPECTED_GOLD_COLUMNS = {
-    "default.dm_risks": [
+    "dm_risks": [
         "year",
         "month",
         "avg_temp_c",
@@ -48,7 +59,7 @@ EXPECTED_GOLD_COLUMNS = {
         "avg_sea_level_pres_hpa",
         "sunshine_total_min",
     ],
-    "default.dm_tourism": [
+    "dm_tourism": [
         "year",
         "month",
         "avg_temp_c",
@@ -59,7 +70,7 @@ EXPECTED_GOLD_COLUMNS = {
         "avg_wind_speed_kmh",
         "sunshine_total_min",
     ],
-    "default.dm_agriculture": [
+    "dm_agriculture": [
         "year",
         "month",
         "avg_temp_c",
@@ -120,44 +131,53 @@ def print_section(title):
 
 print_section("DATA-CLYSME QUALITY CHECKS")
 
+args = build_parser().parse_args()
+gold_tables = [args.risk_table, args.tourism_table, args.agri_table]
+
 results = []
 
 # Bronze checks
-if hdfs_path_exists(BRONZE_PATH):
-    bronze_df = spark.read.parquet(BRONZE_PATH)
+if hdfs_path_exists(args.bronze_path):
+    bronze_df = spark.read.parquet(args.bronze_path)
     bronze_count = bronze_df.count()
-    print("[OK] Bronze path exists: {}".format(BRONZE_PATH))
+    print("[OK] Bronze path exists: {}".format(args.bronze_path))
     print("Bronze row count: {}".format(bronze_count))
     results.append(("bronze_exists", "OK"))
     results.append(("bronze_count", str(bronze_count)))
 else:
-    print("[KO] Bronze path missing: {}".format(BRONZE_PATH))
+    print("[KO] Bronze path missing: {}".format(args.bronze_path))
     results.append(("bronze_exists", "KO"))
 
 # Silver checks
-if table_exists(SILVER_TABLE):
-    silver_df = spark.table(SILVER_TABLE)
+if table_exists(args.silver_table):
+    silver_df = spark.table(args.silver_table)
     silver_count = silver_df.count()
     silver_missing = missing_columns(silver_df, EXPECTED_SILVER_COLUMNS)
 
-    print("[OK] Silver table exists: {}".format(SILVER_TABLE))
+    print("[OK] Silver table exists: {}".format(args.silver_table))
     print("Silver row count: {}".format(silver_count))
     print("Silver missing columns: {}".format(silver_missing if silver_missing else "none"))
 
-    silver_nulls = null_rates(silver_df, ["date", "year", "month", "avg_temp_c", "precipitation_mm"])
+    silver_nulls = null_rates(silver_df, ["date", "year", "month", "day", "avg_temp_c", "precipitation_mm"])
     print("Silver null rates: {}".format(silver_nulls))
 
     results.append(("silver_exists", "OK"))
     results.append(("silver_count", str(silver_count)))
     results.append(("silver_missing_columns", ",".join(silver_missing)))
 else:
-    print("[KO] Silver table missing: {}".format(SILVER_TABLE))
+    print("[KO] Silver table missing: {}".format(args.silver_table))
     results.append(("silver_exists", "KO"))
 
-# Gold checks
-for table_name in GOLD_TABLES:
-    if table_exists(table_name):
-        dm_df = spark.table(table_name)
+# Gold checks (MySQL relationnel)
+jdbc_props = {
+    "user": args.jdbc_user,
+    "password": args.jdbc_password,
+    "driver": args.jdbc_driver,
+}
+
+for table_name in gold_tables:
+    try:
+        dm_df = spark.read.jdbc(url=args.jdbc_url, table=table_name, properties=jdbc_props)
         dm_count = dm_df.count()
         dm_missing = missing_columns(dm_df, EXPECTED_GOLD_COLUMNS[table_name])
 
@@ -168,7 +188,7 @@ for table_name in GOLD_TABLES:
         results.append(("{}_exists".format(table_name), "OK"))
         results.append(("{}_count".format(table_name), str(dm_count)))
         results.append(("{}_missing_columns".format(table_name), ",".join(dm_missing)))
-    else:
+    except Exception:
         print("[KO] Gold table missing: {}".format(table_name))
         results.append(("{}_exists".format(table_name), "KO"))
 
