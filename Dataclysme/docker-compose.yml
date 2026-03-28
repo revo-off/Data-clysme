@@ -93,14 +93,13 @@ services:
     volumes:
       - ./source:/source
 
-  
   spark-worker-2:
     image: bde2020/spark-worker:3.0.0-hadoop3.2
     container_name: spark-worker-2
     depends_on:
       - spark-master
     ports:
-      - "8082:8081"     # UI du worker 2 exposée sur 8082 (interne reste 8081)
+      - "8082:8081" # UI du worker 2 exposée sur 8082 (interne reste 8081)
     environment:
       - SPARK_MASTER=spark://spark-master:7077
       - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
@@ -108,7 +107,6 @@ services:
       - SPARK_WORKER_MEMORY=4g
     volumes:
       - ./source:/source
-
 
   hive-server:
     image: bde2020/hive:2.3.2-postgresql-metastore
@@ -158,8 +156,24 @@ services:
     volumes:
       - ./mysql_data:/var/lib/mysql
 
+  api:
+    build:
+      context: ./api
+    container_name: dataclysme-api
+    restart: always
+    depends_on:
+      - mysql
+    environment:
+      API_JWT_SECRET: change-me-please
+      API_JWT_ALGORITHM: HS256
+      API_TOKEN_EXPIRE_MINUTES: 60
+      API_USER: admin
+      API_PASSWORD: admin123
+      DATABASE_URL: mysql+pymysql://root:my-secret-pw@mysql:3306/dataclysme
+    ports:
+      - "8000:8000"
+
 volumes:
   hadoop_namenode:
   hadoop_datanode:
   hadoop_historyserver:
-
