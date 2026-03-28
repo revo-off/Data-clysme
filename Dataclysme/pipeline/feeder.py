@@ -1,100 +1,61 @@
-import argparse
-import logging
-import os
-
+# -*- coding: utf-8 -*-
 from pyspark.sql import SparkSession, functions as F
+import time
 
+spark = (
+    SparkSession.builder
+    .appName("weather-feeder")
+    .getOrCreate()
+)
 
-def build_parser():
-    parser = argparse.ArgumentParser(description="Ingest open data weather files into raw layer.")
-    parser.add_argument("--input-path", default=os.getenv("FEEDER_INPUT_PATH"))
-    parser.add_argument("--raw-output-path", default=os.getenv("FEEDER_RAW_OUTPUT_PATH"))
-    parser.add_argument("--run-date", default=os.getenv("RUN_DATE"))
-    parser.add_argument("--app-name", default="weather-feeder-raw")
-    parser.add_argument("--write-mode", default="overwrite", choices=["overwrite", "append"])
-    parser.add_argument("--output-partitions", type=int, default=4)
-    parser.add_argument("--log-file", default=os.getenv("FEEDER_LOG_FILE", "/opt/pipeline/logs/feeder.txt"))
-    return parser
+input_path = "file:///source/daily_weather.parquet" 
+df = spark.read.parquet(input_path)
 
+# ----- Ajout pour la récupération MySQL -----
+jdbc_url = "jdbc:mysql://mysql:3306/dataclysme"
+properties = {
+    "user": "root",
+    "password": "my-secret-pw",
+    "driver": "com.mysql.cj.jdbc.Driver"
+}
 
-def configure_logger(log_file):
-    log_dir = os.path.dirname(log_file)
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
+df_cities = spark.read.jdbc(url=jdbc_url, table="cities", properties=properties)
+df_countries = spark.read.jdbc(url=jdbc_url, table="countries", properties=properties)
 
-    logging.basicConfig(
-        filename=log_file,
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
-    return logging.getLogger("feeder")
+# On retire la colonne 'country' et 'iso2' de countries pour éviter les duplicatas de colonnes lors des jointures
+df_countries_clean = df_countries.drop("country", "iso2")
 
+# On joint cities avec countries via iso3
+df_geo = df_cities.join(df_countries_clean, on="iso3", how="left")
 
-def require_args(args, logger):
-    missing = []
-    if not args.input_path:
-        missing.append("--input-path or FEEDER_INPUT_PATH")
-    if not args.raw_output_path:
-        missing.append("--raw-output-path or FEEDER_RAW_OUTPUT_PATH")
+# On joint le parquet (df) avec df_geo via `city_name`
+df_joined = df.join(df_geo, on="city_name", how="left")
 
-    if missing:
-        message = "Missing required configuration: {}".format(", ".join(missing))
-        logger.error(message)
-        raise ValueError(message)
+# On supprime les colonnes inutiles pour l'enregistrement (comme station_id ou codes ISO)
+df_joined = df_joined.drop("iso2", "iso3", "station_id", "__index_level_0__")
+# --------------------------------------------
 
+# Création de la colonne 'year' à partir de la date
+df2 = df_joined.withColumn("year", F.year(F.col("date")))
 
-def main():
-    args = build_parser().parse_args()
-    logger = configure_logger(args.log_file)
+df2.cache()
 
-    spark = (
-        SparkSession.builder
-        .appName(args.app_name)
-        .getOrCreate()
-    )
+df2.show(5)
 
-    try:
-        require_args(args, logger)
-        logger.info("Reading source data from %s", args.input_path)
+r =  df2.count()
+print("Nombre de lignes : {}".format(r))
 
-        df_weather = spark.read.parquet(args.input_path)
+output_base = "hdfs://namenode:9000/data/bronze/weather_daily"
 
-        if args.run_date:
-            ingestion_date = F.to_date(F.lit(args.run_date))
-        else:
-            ingestion_date = F.current_date()
+time.sleep(30)
 
-        df_raw = (
-            df_weather
-            .withColumn("ingestion_date", ingestion_date)
-            .withColumn("year", F.year(F.col("ingestion_date")))
-            .withColumn("month", F.month(F.col("ingestion_date")))
-            .withColumn("day", F.dayofmonth(F.col("ingestion_date")))
-            .persist()
-        )
+(
+    df2.repartition(4)
+    .write
+    .mode("overwrite")
+    .partitionBy("year")
+    .parquet(output_base)
+)
 
-        row_count = df_raw.count()
-        logger.info("Raw rows ingested: %s", row_count)
+spark.stop()
 
-        (
-            df_raw.repartition(args.output_partitions)
-            .write
-            .mode(args.write_mode)
-            .partitionBy("year", "month", "day")
-            .parquet(args.raw_output_path)
-        )
-
-        logger.info(
-            "Raw write complete to %s with partitioning year/month/day",
-            args.raw_output_path,
-        )
-
-    except Exception:
-        logger.error("Feeder execution failed", exc_info=True)
-        raise
-    finally:
-        spark.stop()
-
-
-if __name__ == "__main__":
-    main()

@@ -6,7 +6,7 @@ from pyspark.sql import SparkSession, functions as F
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Run pipeline quality checks.")
-    parser.add_argument("--bronze-path", default=os.getenv("BRONZE_PATH", "hdfs://namenode:9000/data/raw/weather_daily"))
+    parser.add_argument("--bronze-path", default=os.getenv("BRONZE_PATH", "hdfs://namenode:9000/data/bronze/weather_daily"))
     parser.add_argument("--silver-table", default=os.getenv("SILVER_TABLE", "default.weather_silver"))
     parser.add_argument("--jdbc-url", default=os.getenv("JDBC_URL"))
     parser.add_argument("--jdbc-user", default=os.getenv("JDBC_USER"))
@@ -93,7 +93,12 @@ def hdfs_path_exists(path):
 
 
 def table_exists(table_name):
-    return spark.catalog.tableExists(table_name)
+    # En Spark 2/3 (API pyspark), on utilise try/except ou on verifie la db
+    try:
+        spark.table(table_name)
+        return True
+    except Exception:
+        return False
 
 
 def missing_columns(df, expected_cols):
