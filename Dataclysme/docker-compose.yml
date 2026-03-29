@@ -173,16 +173,6 @@ services:
     ports:
       - "8000:8000"
 
-  viz:
-    build:
-      context: ./viz
-    container_name: dataclysme-viz
-    restart: always
-    depends_on:
-      - api
-    ports:
-      - "8501:8501"
-
 volumes:
   hadoop_namenode:
   hadoop_datanode:
