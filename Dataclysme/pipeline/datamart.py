@@ -62,8 +62,13 @@ def main():
         .getOrCreate()
     )
 
-    print("Chargement de default.weather_silver depuis Hive...")
-    df = spark.table("default.weather_silver")
+    print("Chargement de weather_silver depuis HDFS...")
+    df = spark.read.parquet("hdfs://namenode:9000/data/silver/weather_curated")
+    
+    cnt = df.count()
+    print("Nombre de lignes chargees: {}".format(cnt))
+    if cnt == 0:
+        print("ATTENTION: Le DataFrame est vide !")
 
     print("Construction des aggrégations (Datamarts)...")
     dm_risks = build_datamart(df, RISK_RULES)
