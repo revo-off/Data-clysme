@@ -26,15 +26,31 @@ numeric_cols = [
     "sunshine_total_min"
 ]
 
-df2 = df
+df2 = (
+    df
+    .withColumn(
+        "date",
+        F.coalesce(
+            F.to_date(F.col("date")),
+            F.to_date(F.col("date").cast("string"), "yyyy-MM-dd"),
+            F.to_date(F.col("date").cast("string"), "yyyy/MM/dd"),
+        ),
+    )
+)
+
+if "city" in df2.columns:
+    df2 = df2.withColumn("city_name", F.coalesce(F.col("city_name"), F.col("city")))
+
+if "country_name" in df2.columns:
+    df2 = df2.withColumn("country", F.coalesce(F.col("country"), F.col("country_name")))
 
 # On s'assure que chaque colonne numerique est bien typee en double
 for col_name in numeric_cols:
     if col_name in df2.columns:
         df2 = df2.withColumn(col_name, F.col(col_name).cast("double"))
 
-# Nettoyage de base : suppression des lignes sans date ou sans coordonnees
-df2 = df2.dropna(subset=["date", "city_name", "year"])
+# Nettoyage de base : conserver les lignes exploitables pour silver
+df2 = df2.dropna(subset=["date", "year"])
 
 # On peut aussi s'assurer qu'il n'y ait pas de doublons purs
 df2 = df2.dropDuplicates()

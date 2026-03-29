@@ -40,8 +40,6 @@ df2 = df_joined.withColumn("year", F.year(F.col("date")))
 
 df2.cache()
 
-df2.show(5)
-
 r =  df2.count()
 print("Nombre de lignes : {}".format(r))
 
